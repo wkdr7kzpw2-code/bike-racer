@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#14182b">
+  <title>Moto Rush</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <button id="btnPause" class="hud-btn" aria-label="Пауза">❚❚</button>
+    <div class="hud-box"><span class="hud-label">ВРЕМЯ</span><span id="hudTime">0:00.0</span></div>
+    <div class="hud-box"><span class="hud-label">ОЧКИ</span><span id="hudScore">0</span></div>
+    <div class="hud-box"><span class="hud-label">●</span><span id="hudCoins">0</span></div>
+    <div id="progress"><div id="progressFill"></div><div id="progressBike"></div></div>
+  </div>
+  <div id="tricks"></div>
+  <div id="controls" class="hidden">
+    <div class="ctrl-group">
+      <button class="ctrl" data-key="back" aria-label="Наклон назад">↺</button>
+      <button class="ctrl" data-key="fwd" aria-label="Наклон вперёд">↻</button>
+    </div>
+    <div class="ctrl-group">
+      <button class="ctrl ctrl-brake" data-key="brake" aria-label="Тормоз">◀</button>
+      <button class="ctrl ctrl-gas" data-key="gas" aria-label="Газ">▶</button>
+    </div>
+  </div>
+
+  <!-- Main menu -->
+  <section id="menu" class="screen">
+    <div class="menu-wrap">
+      <div class="logo">
+        <div class="logo-title">MOTO<span>RUSH</span></div>
+        <div class="logo-sub">трюки · прыжки · рекорды</div>
+      </div>
+      <div class="menu-buttons">
+        <button class="btn btn-primary" data-go="levels">▶ Играть</button>
+        <button class="btn" data-go="garage">🏍 Мотоциклы</button>
+        <button class="btn" data-go="rating">🏆 Рейтинг</button>
+        <button class="btn" data-go="settings">⚙ Настройки</button>
+      </div>
+    </div>
+    <div class="wallet">● <span class="coins-val">0</span></div>
+    <div class="player-chip"><span id="menuName">Игрок</span> · <span id="menuRank">Новичок</span></div>
+  </section>
+
+  <!-- Level select -->
+  <section id="levels" class="screen hidden">
+    <header class="bar">
+      <button class="btn btn-small" data-go="menu">← Назад</button>
+      <h2>Выбор трассы</h2>
+      <div class="wallet-inline">● <span class="coins-val">0</span></div>
+    </header>
+    <div id="levelGrid" class="level-grid"></div>
+    <div class="levels-foot">Мотоцикл: <b id="levelsBike">Скаут</b> <button class="btn btn-small" data-go="garage">Сменить</button></div>
+  </section>
+
+  <!-- Garage -->
+  <section id="garage" class="screen hidden">
+    <header class="bar">
+      <button class="btn btn-small" data-go="menu">← Назад</button>
+      <h2>Мотоциклы</h2>
+      <div class="wallet-inline">● <span class="coins-val">0</span></div>
+    </header>
+    <div class="garage-body">
+      <button class="arrow" id="garPrev" aria-label="Предыдущий">‹</button>
+      <div class="garage-card">
+        <canvas id="garageCanvas" width="360" height="200"></canvas>
+        <div class="garage-info">
+          <div class="garage-name" id="garName">Скаут</div>
+          <div class="garage-desc" id="garDesc"></div>
+          <div class="stats" id="garStats"></div>
+          <button class="btn btn-primary" id="garAction">Выбрать</button>
+        </div>
+      </div>
+      <button class="arrow" id="garNext" aria-label="Следующий">›</button>
+    </div>
+    <div class="garage-dots" id="garDots"></div>
+  </section>
+
+  <!-- Rating -->
+  <section id="rating" class="screen hidden">
+    <header class="bar">
+      <button class="btn btn-small" data-go="menu">← Назад</button>
+      <h2>Рейтинг</h2>
+      <div class="tabs">
+        <button class="tab active" data-tab="board">Лучшие заезды</button>
+        <button class="tab" data-tab="tracks">Трассы</button>
+      </div>
+    </header>
+    <div class="rating-body">
+      <div class="rank-card">
+        <div class="rank-title" id="rankTitle">Новичок</div>
+        <div class="rank-name" id="rankName">Игрок</div>
+        <div class="rank-stats" id="rankStats"></div>
+        <div class="rank-bar"><div id="rankFill"></div></div>
+        <div class="rank-next" id="rankNext"></div>
+      </div>
+      <div class="rating-list" id="ratingList"></div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="settings" class="screen hidden">
+    <header class="bar">
+      <button class="btn btn-small" data-go="menu">← Назад</button>
+      <h2>Настройки</h2>
+      <div></div>
+    </header>
+    <div class="settings-body">
+      <label class="field">Имя игрока
+        <input id="nameInput" maxlength="14" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="toggle"><input type="checkbox" id="optSound"> Звук</label>
+      <label class="toggle"><input type="checkbox" id="optVibro"> Вибрация</label>
+      <div class="help">
+        <b>Управление:</b> ▶ газ, ◀ тормоз / назад, ↺ ↻ наклон.
+        В воздухе крутите сальто наклоном — за каждое приземлённое сальто даются очки.
+        Держите заднее колесо на земле для «вилли». На компьютере: стрелки или WASD, P — пауза.
+      </div>
+      <button class="btn btn-danger btn-small" id="resetBtn">Сбросить прогресс</button>
+    </div>
+  </section>
+
+  <!-- Pause -->
+  <section id="pause" class="screen overlay hidden">
+    <div class="dialog">
+      <h2>Пауза</h2>
+      <button class="btn btn-primary" id="resumeBtn">Продолжить</button>
+      <button class="btn" id="restartBtn">Заново</button>
+      <button class="btn" id="quitBtn">В меню</button>
+    </div>
+  </section>
+
+  <!-- Result -->
+  <section id="result" class="screen overlay hidden">
+    <div class="dialog dialog-wide">
+      <h2 id="resTitle">Финиш!</h2>
+      <div class="res-stars" id="resStars"></div>
+      <div class="res-record hidden" id="resRecord">Новый рекорд!</div>
+      <div class="res-table" id="resTable"></div>
+      <div class="res-buttons">
+        <button class="btn" id="resMenu">Меню</button>
+        <button class="btn" id="resRetry">Заново</button>
+        <button class="btn btn-primary" id="resNext">Далее ▶</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="rotate" class="hidden"><div>📱↻<br>Поверните устройство горизонтально</div></div>
+  <div id="toast"></div>
+
+  <script src="core.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
