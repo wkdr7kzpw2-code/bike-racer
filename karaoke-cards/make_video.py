@@ -113,20 +113,23 @@ def schedule(lines, beats, dur):
 
 # ---------- drawing ----------
 
-PALETTE = [(46, 38, 74), (34, 46, 78), (64, 40, 72), (30, 52, 66)]
+PALETTE = [(44, 32, 78), (28, 40, 82), (66, 34, 76), (24, 52, 70)]
 BLOBS = [(196, 164, 232), (150, 190, 236), (236, 168, 196), (160, 214, 200), (240, 200, 160)]
 
 def background(t, tint):
     w, h = W // 8, H // 8
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     base = np.array(tint, np.float32)
-    img = np.ones((h, w, 3), np.float32) * (base * 0.55)
+    img = np.ones((h, w, 3), np.float32) * (base * 0.6)
     for k, c in enumerate(BLOBS):
         cx = w * (0.5 + 0.38 * math.sin(0.23 * t + k * 1.7))
         cy = h * (0.5 + 0.40 * math.cos(0.17 * t + k * 2.3))
         r = w * (0.55 + 0.1 * math.sin(0.3 * t + k))
         g = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * r * r))[..., None]
-        img += g * np.array(c, np.float32) * 0.28
+        img += g * np.array(c, np.float32) * 0.32
+    # vignette: darken the edges so the card stands out
+    d = np.sqrt(((xx - w / 2) / (w / 2)) ** 2 * 0.3 + ((yy - h / 2) / (h / 2)) ** 2)[..., None]
+    img = img * (1 - 0.55 * np.clip((d - 0.35) / 0.65, 0, 1)) + np.array((10, 6, 22)) * 0.55 * np.clip((d - 0.35) / 0.65, 0, 1)
     img = np.clip(img, 0, 255).astype(np.uint8)
     return Image.fromarray(img).resize((W, H), Image.BICUBIC)
 
@@ -311,7 +314,15 @@ def main():
             place(frame, cards[i], 1.05 - 0.05 * k, 34 * (1 - k), k, -30 * (1 - k))
         else:
             place(frame, cards[i], 1 + pulse, 0, 1)
-        enc.stdin.write(frame.convert("RGB").tobytes())
+        out = np.asarray(frame.convert("RGB"), np.float32)
+        flash = 0.10 * math.exp(-max(0.0, t - s) * 7) if i > 0 else 0
+        if flash > 0.004:  # soft light kick on each card change
+            out = out * (1 - flash) + np.array((255, 240, 252)) * flash
+        fade = (t - (dur - 0.5)) / 0.5
+        if fade > 0:       # fade out together with the audio
+            k = min(1, fade) * 0.85
+            out = out * (1 - k) + np.array((12, 8, 22)) * k
+        enc.stdin.write(np.clip(out, 0, 255).astype(np.uint8).tobytes())
     enc.stdin.close(); enc.wait()
     os.remove(work)
     print("wrote", a.out)
