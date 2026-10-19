@@ -1,0 +1,412 @@
+<title>Караоке-карточки</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: phone-shaped live preview on the left, one column of controls on the right; stacks on phones.
+   Single dark look on purpose: the page matches the dusky pastel world of the video it makes. */
+:root {
+  color-scheme: dark;
+  --bg: #17141f;
+  --panel: #221d2e;
+  --line: #3a3249;
+  --fg: #efe9f7;
+  --muted: #a69cb8;
+  --accent: #d9a6e8;
+  --accent-ink: #261a2c;
+  --danger: #f2a0a8;
+  --font: "Onest", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 40px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 28px; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); align-items: start }
+@media (max-width: 760px) { .wrap { grid-template-columns: minmax(0, 1fr) } .stage { max-width: 320px; margin: 0 auto } }
+h1 { font-size: 26px; line-height: 1.2; margin: 0 0 4px; font-weight: 800; letter-spacing: -0.01em; text-wrap: balance }
+.lede { color: var(--muted); margin: 0 0 20px; max-width: 60ch }
+.stage { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); width: 100% }
+canvas { display: block; width: 100%; max-width: 100%; aspect-ratio: 9 / 16; height: auto; border-radius: 22px; background: #2a2340; box-shadow: 0 20px 50px rgba(0,0,0,.45) }
+.meta { margin-top: 10px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-align: center }
+form { display: grid; gap: 18px; min-width: 0 }
+.field { display: grid; gap: 6px; min-width: 0 }
+label, .label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted) }
+.hint { font-size: 13px; color: var(--muted) }
+input[type=text], textarea {
+  width: 100%; font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px 12px; font-variant-numeric: tabular-nums;
+}
+textarea { min-height: 170px; resize: vertical; line-height: 1.55 }
+input:focus-visible, textarea:focus-visible, button:focus-visible, .file:focus-within { outline: 2px solid var(--accent); outline-offset: 2px }
+.row { display: flex; flex-wrap: wrap; gap: 12px }
+.row > .field { flex: 1 1 120px }
+.file { display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 12px; min-width: 0 }
+.file input { position: absolute; opacity: 0; width: 1px; height: 1px }
+.file span, .file button { min-width: 0; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; font-size: 14px }
+.file span { font-weight: 400 }
+button {
+  font: inherit; font-weight: 600; border-radius: 999px; padding: 11px 20px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent) }
+button:disabled { opacity: .5; cursor: default }
+.status { min-height: 1.5em; font-size: 14px; color: var(--muted) }
+.status.err { color: var(--danger) }
+video { width: 100%; max-width: 320px; border-radius: 16px; display: block }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto } }
+</style>
+
+<div class="wrap">
+  <div class="stage">
+    <canvas id="cv" width="1080" height="1920" aria-label="Превью видео"></canvas>
+    <div class="meta" id="meta">Превью · без музыки · 120 BPM</div>
+  </div>
+
+  <div>
+    <h1>Караоке-карточки</h1>
+    <p class="lede">Каждая строчка на своей iOS-карточке, сверху караоке-подпись, смена карточек через размытие точно в бит. Видео 1080×1920 собирается прямо в браузере.</p>
+
+    <form id="f">
+      <div class="field">
+        <span class="label">Песня</span>
+        <label class="file" for="audio">
+          <button type="button" id="pick">Выбрать mp3</button>
+          <span id="fname" class="hint">Файл не выбран, превью играет без звука</span>
+          <input id="audio" type="file" accept="audio/*">
+        </label>
+      </div>
+
+      <div class="row">
+        <div class="field"><label for="from">С</label><input id="from" type="text" value="0:43" inputmode="decimal"></div>
+        <div class="field"><label for="to">По</label><input id="to" type="text" value="0:52" inputmode="decimal"></div>
+        <div class="field"><label for="bpm">Темп, BPM</label><input id="bpm" type="text" placeholder="авто" inputmode="decimal"></div>
+      </div>
+
+      <div class="field">
+        <label for="lyrics">Строчки</label>
+        <textarea id="lyrics" spellcheck="false"></textarea>
+        <span class="hint">Одна строка — одна карточка. Можно вставить весь текст разом. Чтобы закрепить момент смены, начни строку со времени внутри фрагмента: <code>[0:02.3]</code>.</span>
+      </div>
+
+      <div class="field">
+        <label for="header">Подпись на карточке</label>
+        <input id="header" type="text" value="Музыка">
+      </div>
+
+      <div class="row">
+        <button type="button" id="play">▶ Превью</button>
+        <button type="submit" class="primary" id="rec">Записать видео</button>
+      </div>
+      <div class="status" id="status" role="status"></div>
+      <div id="result" hidden></div>
+    </form>
+  </div>
+</div>
+
+<script>
+const W = 1080, H = 1920, FPS = 30;
+const $ = (id) => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const FONT = '"Onest", system-ui, -apple-system, sans-serif';
+const SAMPLE = "Здесь будет первая строчка\nВторая строчка на своей карточке\nТретья меняется ровно в бит\nИ четвёртая, финальная";
+
+let actx = null, audioBuf = null, plan = [], cards = [], beats = [], bpm = 120;
+let playing = null; // {t0, src, raf, onEnd}
+
+// ---------- persistence of the draft (per viewer only) ----------
+try { $("lyrics").value = localStorage.getItem("kc-lyrics") ?? SAMPLE } catch { $("lyrics").value = SAMPLE }
+$("lyrics").addEventListener("input", () => { try { localStorage.setItem("kc-lyrics", $("lyrics").value) } catch {} });
+
+// ---------- helpers ----------
+function parseTime(s) {
+  s = String(s).trim().replace(",", ".");
+  let m = s.match(/^(\d+)[:.](\d{1,2}(?:\.\d+)?)$/);            // 0:43, 0.43, 1:05.5
+  if (m && (s.includes(":") || m[2].length === 2)) return +m[1] * 60 + +m[2];
+  m = s.match(/^\d+(?:\.\d+)?$/);
+  return m ? +s : NaN;
+}
+const ease = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x) };
+const segment = () => {
+  const a = parseTime($("from").value), b = parseTime($("to").value);
+  if (!(b > a)) throw new Error("Проверь время: «по» должно быть больше «с», формат 0:43.");
+  return { start: a, dur: b - a };
+};
+function readLines() {
+  return $("lyrics").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const m = l.match(/^\[(\d+[:.]\d+(?:\.\d+)?|\d+(?:\.\d+)?)\]\s*(.*)$/);
+    return m ? { at: parseTime(m[1]), text: m[2] } : { at: null, text: l };
+  });
+}
+function status(msg, err) { $("status").textContent = msg; $("status").className = "status" + (err ? " err" : "") }
+
+// ---------- beat detection ----------
+function detectBeats(buf, start, dur, fixedBpm) {
+  if (!buf) {
+    const p = 60 / (fixedBpm || 120), out = [];
+    for (let t = 0; t < dur; t += p) out.push(t);
+    return { bpm: fixedBpm || 120, beats: out };
+  }
+  const sr = buf.sampleRate, hop = 512, a = Math.floor(start * sr), n = Math.floor(dur * sr);
+  const chs = []; for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c));
+  const frames = Math.floor(n / hop), env = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    let e = 0, prev = 0;
+    for (let k = 0; k < hop; k++) {
+      let x = 0; const j = a + i * hop + k;
+      for (const ch of chs) x += ch[j] || 0;
+      e += Math.abs(x - prev); prev = x;            // crude high-pass energy: transients pop out
+    }
+    env[i] = Math.log1p(e * 4);
+  }
+  const flux = new Float32Array(frames);
+  for (let i = 1; i < frames; i++) flux[i] = Math.max(0, env[i] - env[i - 1]);
+  const fr = sr / hop, at = (t) => { const x = t * fr, i = Math.floor(x); return i + 1 < frames ? flux[i] * (1 - (x - i)) + flux[i + 1] * (x - i) : 0 };
+  const comb = (period) => {
+    let best = [-1, 0];
+    for (let s = 0; s < 48; s++) {
+      const ph = period * s / 48; let sum = 0, cnt = 0;
+      for (let t = ph; t < dur; t += period) { sum += at(t); cnt++ }
+      if (sum / cnt > best[0]) best = [sum / cnt, ph];
+    }
+    return best;
+  };
+  let tempo = fixedBpm;
+  if (!tempo) {
+    let bestScore = -1;
+    for (let c = 70; c <= 180; c += 0.5) {
+      const prior = Math.exp(-0.5 * (Math.log2(c / 120)) ** 2);
+      const sc = comb(60 / c)[0] * prior;
+      if (sc > bestScore) { bestScore = sc; tempo = c }
+    }
+  }
+  const period = 60 / tempo, phase = comb(period)[1], out = [];
+  for (let t = phase; t < dur; t += period) out.push(t);
+  return { bpm: tempo, beats: out };
+}
+
+function schedule(lines, beats, dur) {
+  const snap = (t) => beats.length ? beats.reduce((b, x) => Math.abs(x - t) < Math.abs(b - t) ? x : b) : t;
+  const starts = lines.map((l, i) => i === 0 ? 0 : snap(l.at != null ? l.at : dur * i / lines.length));
+  return lines.map((l, i) => ({ s: starts[i], e: i + 1 < lines.length ? starts[i + 1] : dur, text: l.text }));
+}
+
+// ---------- drawing ----------
+function wrap(c, text, maxw) {
+  const out = []; let cur = "";
+  for (const w of text.split(/\s+/)) {
+    const t = cur ? cur + " " + w : w;
+    if (c.measureText(t).width <= maxw || !cur) cur = t; else { out.push(cur); cur = w }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+function rr(c, x, y, w, h, r) { c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, r) : c.rect(x, y, w, h) }
+
+function makeCard(text, idx, total, header) {
+  const cw = 920, pad = 56, m = 80, lh = 84;
+  const tmp = document.createElement("canvas").getContext("2d");
+  tmp.font = `700 66px ${FONT}`;
+  const lines = wrap(tmp, text, cw - 2 * pad);
+  const ch = pad + 64 + 40 + lines.length * lh + 50 + pad;
+  const can = document.createElement("canvas"); can.width = cw + 2 * m; can.height = ch + 2 * m;
+  const c = can.getContext("2d");
+  c.save(); c.shadowColor = "rgba(8,4,20,.55)"; c.shadowBlur = 70; c.shadowOffsetY = 26;
+  c.fillStyle = "rgba(246,243,250,.97)"; rr(c, m, m, cw, ch, 60); c.fill(); c.restore();
+  const x0 = m + pad, y0 = m + pad;
+  const g = c.createLinearGradient(0, y0, 0, y0 + 64); g.addColorStop(0, "#fc5c7d"); g.addColorStop(1, "#ba54f5");
+  c.fillStyle = g; rr(c, x0, y0, 64, 64, 15); c.fill();
+  c.fillStyle = "#fff"; c.font = `700 36px ${FONT}`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("♫", x0 + 32, y0 + 34);
+  c.textAlign = "left"; c.fillStyle = "#78708c"; c.font = `600 33px ${FONT}`; c.fillText(header.toUpperCase(), x0 + 88, y0 + 33);
+  c.textAlign = "right"; c.fillStyle = "#9690a5"; c.font = `500 30px ${FONT}`; c.fillText("сейчас", m + cw - pad, y0 + 33);
+  c.textAlign = "left"; c.textBaseline = "top"; c.fillStyle = "#1c1828"; c.font = `700 66px ${FONT}`;
+  const ty = y0 + 104;
+  lines.forEach((l, i) => c.fillText(l, x0, ty + i * lh));
+  const dy = ty + lines.length * lh + 30;
+  for (let k = 0; k < total; k++) { c.fillStyle = k === idx ? "#1c1828" : "#c8c2d6"; c.beginPath(); c.arc(x0 + 6 + k * 26, dy, 6, 0, 7); c.fill() }
+  return can;
+}
+
+const TINTS = [[46, 38, 74], [34, 46, 78], [64, 40, 72], [30, 52, 66]];
+const BLOBS = [[196, 164, 232], [150, 190, 236], [236, 168, 196], [160, 214, 200], [240, 200, 160]];
+function background(t, i) {
+  const [r, g, b] = TINTS[i % TINTS.length];
+  ctx.fillStyle = `rgb(${r * .55 | 0},${g * .55 | 0},${b * .55 | 0})`; ctx.fillRect(0, 0, W, H);
+  BLOBS.forEach(([R, G, B], k) => {
+    const cx = W * (0.5 + 0.38 * Math.sin(0.23 * t + k * 1.7)), cy = H * (0.5 + 0.40 * Math.cos(0.17 * t + k * 2.3));
+    const rad = W * (0.95 + 0.15 * Math.sin(0.3 * t + k));
+    const gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+    gr.addColorStop(0, `rgba(${R},${G},${B},.30)`); gr.addColorStop(1, `rgba(${R},${G},${B},0)`);
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  });
+}
+
+function karaoke(text, prog) {
+  ctx.save();
+  ctx.font = `700 50px ${FONT}`; ctx.textBaseline = "top";
+  const lines = wrap(ctx, text, W - 160);
+  const total = text.replace(/\s+/g, "").length || 1;
+  let lit = prog * total, acc = 0, y = 230 + (3 - Math.min(3, lines.length)) * 30;
+  for (const ln of lines) {
+    let x = (W - ctx.measureText(ln).width) / 2;
+    for (const w of ln.split(" ")) {
+      const ww = ctx.measureText(w).width;
+      ctx.shadowBlur = 0; ctx.fillStyle = "rgba(255,255,255,.38)"; ctx.fillText(w, x, y);
+      const frac = Math.min(1, Math.max(0, (lit - acc) / w.length));
+      if (frac > 0) {
+        ctx.save(); ctx.beginPath(); ctx.rect(x - 4, y - 14, ww * frac + 6, 80); ctx.clip();
+        ctx.shadowColor = "rgba(255,200,240,.85)"; ctx.shadowBlur = 22; ctx.fillStyle = "#fff0fa"; ctx.fillText(w, x, y);
+        ctx.restore();
+      }
+      acc += w.length; x += ww + ctx.measureText(" ").width;
+    }
+    y += 66;
+  }
+  ctx.restore();
+}
+
+const FILTER_OK = (() => { const c = document.createElement("canvas").getContext("2d"); c.filter = "blur(2px)"; return c.filter === "blur(2px)" })();
+const scratch = document.createElement("canvas"), sctx = scratch.getContext("2d");
+function place(card, scale, blur, alpha, dy) {
+  const w = card.width * scale, h = card.height * scale, x = (W - w) / 2, y = H * 0.56 - h / 2 + dy;
+  ctx.save(); ctx.globalAlpha = alpha;
+  if (blur < 0.4) ctx.drawImage(card, x, y, w, h);
+  else if (FILTER_OK) { ctx.filter = `blur(${blur}px)`; ctx.drawImage(card, x, y, w, h) }
+  else { // Safari: downscale then upscale with smoothing reads as a blur
+    const k = 1 + blur / 3; scratch.width = Math.max(1, w / k); scratch.height = Math.max(1, h / k);
+    sctx.clearRect(0, 0, scratch.width, scratch.height); sctx.drawImage(card, 0, 0, scratch.width, scratch.height);
+    ctx.imageSmoothingQuality = "high"; ctx.drawImage(scratch, x, y, w, h);
+  }
+  ctx.restore();
+}
+
+function drawFrame(t) {
+  if (!plan.length) { background(t, 0); return }
+  let i = 0; for (let k = 0; k < plan.length; k++) if (plan[k].s <= t + 1e-6) i = k;
+  const { s, e, text } = plan[i];
+  background(t, i);
+  let last = -1; for (const b of beats) if (b <= t) last = b;
+  const pulse = last >= 0 ? 0.018 * Math.exp(-(t - last) * 9) : 0;
+  karaoke(text, Math.min(1, Math.max(0, (t - s) / Math.max(0.1, (e - s) * 0.85))));
+  const TR = 0.16;
+  if (t < s + TR) {
+    const k = i === 0 ? ease(t / (TR * 2)) : ease((t - s) / TR);
+    place(cards[i], 0.94 + 0.06 * k + pulse, 34 * (1 - k), k, 40 * (1 - k));
+  } else if (i + 1 < plan.length && t > e - TR) {
+    const k = ease((e - t) / TR);
+    place(cards[i], 1.05 - 0.05 * k, 34 * (1 - k), k, -30 * (1 - k));
+  } else place(cards[i], 1 + pulse, 0, 1, 0);
+}
+
+// ---------- build ----------
+let seg = { start: 43, dur: 9 };
+async function rebuild() {
+  try { seg = segment() } catch (e) { status(e.message, true); return false }
+  const lines = readLines();
+  if (!lines.length) { status("Добавь хотя бы одну строчку.", true); return false }
+  await document.fonts.load(`700 66px "Onest"`).catch(() => {});
+  const fixed = parseFloat(String($("bpm").value).replace(",", "."));
+  ({ bpm, beats } = detectBeats(audioBuf, seg.start, seg.dur, fixed > 30 ? fixed : 0));
+  plan = schedule(lines, beats, seg.dur);
+  cards = plan.map((p, i) => makeCard(p.text, i, plan.length, $("header").value || "Музыка"));
+  $("meta").textContent = `${seg.dur.toFixed(1)} с · ${audioBuf ? "" : "без музыки · "}${bpm.toFixed(1)} BPM · смены: ${plan.map((p) => p.s.toFixed(2)).join(", ")}`;
+  status("");
+  return true;
+}
+
+function stop() {
+  if (!playing) return;
+  cancelAnimationFrame(playing.raf);
+  try { playing.src?.stop() } catch {}
+  const done = playing.onEnd; playing = null;
+  $("play").textContent = "▶ Превью";
+  done?.();
+}
+
+function run({ record }) {
+  actx ??= new (window.AudioContext || window.webkitAudioContext)();
+  actx.resume();
+  let src = null, dest = null;
+  if (audioBuf) {
+    src = actx.createBufferSource(); src.buffer = audioBuf;
+    const gain = actx.createGain(), now = actx.currentTime + 0.05;
+    gain.gain.setValueAtTime(0, now); gain.gain.linearRampToValueAtTime(1, now + 0.3);
+    gain.gain.setValueAtTime(1, now + seg.dur - 0.8); gain.gain.linearRampToValueAtTime(0, now + seg.dur);
+    src.connect(gain); gain.connect(actx.destination);
+    if (record) { dest = actx.createMediaStreamDestination(); gain.connect(dest) }
+    src.start(now, seg.start, seg.dur);
+  }
+  const t0 = actx.currentTime + 0.05;
+  playing = { src, t0 };
+  const tick = () => {
+    const t = actx.currentTime - t0;
+    if (t >= seg.dur) { drawFrame(seg.dur - 1e-3); stop(); return }
+    drawFrame(Math.max(0, t));
+    playing.raf = requestAnimationFrame(tick);
+  };
+  tick();
+  return dest;
+}
+
+$("play").addEventListener("click", async () => {
+  if (playing) { stop(); return }
+  if (!(await rebuild())) return;
+  $("play").textContent = "■ Стоп";
+  run({ record: false });
+});
+
+$("f").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (playing) stop();
+  if (!(await rebuild())) return;
+  if (!window.MediaRecorder || !cv.captureStream) { status("Этот браузер не умеет записывать видео. Открой страницу в Chrome или Safari на компьютере.", true); return }
+  const types = ["video/mp4;codecs=avc1,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm"];
+  const mime = types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  const ext = mime.startsWith("video/mp4") ? "mp4" : "webm";
+  const stream = cv.captureStream(FPS);
+  $("rec").disabled = true; $("play").disabled = true; $("result").hidden = true;
+  status(`Записываю… ${seg.dur.toFixed(1)} с, не переключай вкладку.`);
+  const chunks = [];
+  const dest = run({ record: true });
+  if (dest) stream.addTrack(dest.stream.getAudioTracks()[0]);
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 10e6 } : undefined);
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec.onstop = async () => {
+    $("rec").disabled = false; $("play").disabled = false;
+    const blob = new Blob(chunks, { type: mime || "video/webm" });
+    const name = `karaoke-cards.${ext}`;
+    const box = $("result"); box.replaceChildren(); box.hidden = false;
+    const v = document.createElement("video"); v.src = URL.createObjectURL(blob); v.controls = true; v.playsInline = true; box.append(v);
+    const downloads = await window.claude?.use?.("downloads").catch(() => null);
+    if (!downloads) { status("Готово. Сохранение файла здесь недоступно, видео можно посмотреть ниже."); return }
+    const save = document.createElement("button"); save.type = "button"; save.className = "primary"; save.textContent = `Сохранить ${ext.toUpperCase()}`;
+    save.style.marginTop = "12px"; box.append(save);
+    const doSave = async () => {
+      try { await downloads.save({ filename: name, data: blob }); status("Сохранено.") }
+      catch (e) { status(e?.code === "declined" ? "Сохранение отменено. Нажми «Сохранить» ещё раз, когда будешь готов." : "Не получилось сохранить: " + (e?.message || e), e?.code !== "declined") }
+    };
+    save.addEventListener("click", doSave);
+    status(`Готово: ${(blob.size / 1e6).toFixed(1)} МБ. Нажми «Сохранить».`);
+  };
+  rec.start(250);
+  playing.onEnd = () => setTimeout(() => rec.state !== "inactive" && rec.stop(), 150);
+});
+
+$("pick").addEventListener("click", () => $("audio").click());
+$("audio").addEventListener("change", async () => {
+  const f = $("audio").files[0]; if (!f) return;
+  stop();
+  $("fname").textContent = f.name; status("Читаю аудио и ищу бит…");
+  try {
+    actx ??= new (window.AudioContext || window.webkitAudioContext)();
+    audioBuf = await actx.decodeAudioData(await f.arrayBuffer());
+    await rebuild(); drawFrame(1.2);
+    status(`Песня загружена (${Math.round(audioBuf.duration)} с). Жми «Превью».`);
+  } catch (e) { audioBuf = null; status("Не получилось прочитать файл. Подойдёт mp3, m4a или wav.", true) }
+});
+["from", "to", "bpm", "header", "lyrics"].forEach((id) => $(id).addEventListener("change", async () => { if (!playing && await rebuild()) drawFrame(1.2) }));
+
+rebuild().then((ok) => ok && drawFrame(1.2));
+</script>
