@@ -267,7 +267,14 @@ def main():
         else:
             y = synth_beat(dur, a.bpm or 120); write_wav(work, y)
 
-    bpm, beats = detect_beats(y, dur, a.bpm)
+    if a.audio and not a.demo:
+        # tempo from a short clip is unreliable: analyse up to 20 s around the fragment
+        w0 = max(0.0, a.start - 20)
+        wy = decode_audio(a.audio, w0, dur + (a.start - w0) + 20)
+        bpm, wbeats = detect_beats(wy, len(wy) / SR, a.bpm)
+        beats = [b - (a.start - w0) for b in wbeats if 0 <= b - (a.start - w0) < dur]
+    else:
+        bpm, beats = detect_beats(y, dur, a.bpm)
     plan = schedule(lines, beats, dur)
     print(f"tempo ≈ {bpm:.1f} BPM, {len(beats)} beats")
     for s, e, t in plan:

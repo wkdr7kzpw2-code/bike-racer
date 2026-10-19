@@ -143,32 +143,71 @@ function readLines() {
 function status(msg, err) { $("status").textContent = msg; $("status").className = "status" + (err ? " err" : "") }
 
 // ---------- beat detection ----------
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]] }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const ang = -2 * Math.PI / size, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let s = 0; s < n; s += size) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < size / 2; k++) {
+        const a = s + k, b = a + size / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        [cr, ci] = [cr * wr - ci * wi, cr * wi + ci * wr];
+      }
+    }
+  }
+}
+
 function detectBeats(buf, start, dur, fixedBpm) {
   if (!buf) {
     const p = 60 / (fixedBpm || 120), out = [];
     for (let t = 0; t < dur; t += p) out.push(t);
     return { bpm: fixedBpm || 120, beats: out };
   }
-  const sr = buf.sampleRate, hop = 512, a = Math.floor(start * sr), n = Math.floor(dur * sr);
+  // Tempo from a short clip is unreliable, so analyse up to 20 s around the fragment
+  // and lay that grid over it.
+  // Mono at ~22 kHz, then spectral flux: the summed rise of log-magnitude across all bins.
+  const step = buf.sampleRate > 30000 ? 2 : 1, sr = buf.sampleRate / step, hop = 512, n = 2048;
+  const w0 = Math.max(0, start - 20), w1 = Math.min(buf.duration, start + dur + 20), wdur = w1 - w0;
   const chs = []; for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c));
-  const frames = Math.floor(n / hop), env = new Float32Array(frames);
-  for (let i = 0; i < frames; i++) {
-    let e = 0, prev = 0;
-    for (let k = 0; k < hop; k++) {
-      let x = 0; const j = a + i * hop + k;
-      for (const ch of chs) x += ch[j] || 0;
-      e += Math.abs(x - prev); prev = x;            // crude high-pass energy: transients pop out
+  const a = Math.floor(w0 * buf.sampleRate), len = Math.floor(wdur * sr);
+  const mono = new Float32Array(len);
+  for (let i = 0; i < len; i++) { let x = 0; for (let k = 0; k < step; k++) for (const ch of chs) x += ch[a + i * step + k] || 0; mono[i] = x / (step * chs.length) }
+  const frames = Math.max(0, 1 + Math.floor((len - n) / hop));
+  const win = new Float32Array(n).map((_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)));
+  const re = new Float64Array(n), im = new Float64Array(n), half = n / 2 + 1;
+  let prevMag = new Float32Array(half), mag = new Float32Array(half);
+  const raw = new Float32Array(frames);
+  for (let f = 0; f < frames; f++) {
+    for (let i = 0; i < n; i++) { re[i] = mono[f * hop + i] * win[i]; im[i] = 0 }
+    fft(re, im);
+    let sum = 0;
+    for (let k = 0; k < half; k++) {
+      mag[k] = Math.log1p(Math.hypot(re[k], im[k]) * 10);
+      if (f) sum += Math.max(0, mag[k] - prevMag[k]);
     }
-    env[i] = Math.log1p(e * 4);
+    raw[f] = sum; [prevMag, mag] = [mag, prevMag];
   }
   const flux = new Float32Array(frames);
-  for (let i = 1; i < frames; i++) flux[i] = Math.max(0, env[i] - env[i - 1]);
-  const fr = sr / hop, at = (t) => { const x = t * fr, i = Math.floor(x); return i + 1 < frames ? flux[i] * (1 - (x - i)) + flux[i + 1] * (x - i) : 0 };
-  const comb = (period) => {
+  for (let i = 0; i < frames; i++) {             // remove the local average so only onsets remain
+    let m = 0, c = 0;
+    for (let j = Math.max(0, i - 8); j < Math.min(frames, i + 8); j++) { m += raw[j]; c++ }
+    flux[i] = Math.max(0, raw[i] - m / c);
+  }
+  // an onset first shows up in the frame whose window just reaches it
+  const fr = sr / hop, at = (t) => { const x = (t - 0.75 * n / sr) * fr, i = Math.floor(x); if (i < 0) return 0; return i + 1 < frames ? flux[i] * (1 - (x - i)) + flux[i + 1] * (x - i) : 0 };
+  const comb = (period, phases = 48) => {
     let best = [-1, 0];
-    for (let s = 0; s < 48; s++) {
-      const ph = period * s / 48; let sum = 0, cnt = 0;
-      for (let t = ph; t < dur; t += period) { sum += at(t); cnt++ }
+    for (let s = 0; s < phases; s++) {
+      const ph = period * s / phases; let sum = 0, cnt = 0;
+      for (let t = ph; t < wdur; t += period) { sum += at(t); cnt++ }
       if (sum / cnt > best[0]) best = [sum / cnt, ph];
     }
     return best;
@@ -178,12 +217,14 @@ function detectBeats(buf, start, dur, fixedBpm) {
     let bestScore = -1;
     for (let c = 70; c <= 180; c += 0.5) {
       const prior = Math.exp(-0.5 * (Math.log2(c / 120)) ** 2);
-      const sc = comb(60 / c)[0] * prior;
+      const sc = comb(60 / c, 24)[0] * prior;
       if (sc > bestScore) { bestScore = sc; tempo = c }
     }
   }
-  const period = 60 / tempo, phase = comb(period)[1], out = [];
-  for (let t = phase; t < dur; t += period) out.push(t);
+  const period = 60 / tempo, phase = comb(period, 96)[1], out = [];
+  // first grid beat at or after the fragment start, in fragment time
+  let t = phase + Math.ceil((start - w0 - phase) / period - 1e-9) * period - (start - w0);
+  for (; t < dur; t += period) out.push(t);
   return { bpm: tempo, beats: out };
 }
 
@@ -229,19 +270,25 @@ function makeCard(text, idx, total, header) {
   return can;
 }
 
-const TINTS = [[46, 38, 74], [34, 46, 78], [64, 40, 72], [30, 52, 66]];
+const TINTS = [[44, 32, 78], [28, 40, 82], [66, 34, 76], [24, 52, 70]];
 const BLOBS = [[196, 164, 232], [150, 190, 236], [236, 168, 196], [160, 214, 200], [240, 200, 160]];
 function background(t, i) {
   const [r, g, b] = TINTS[i % TINTS.length];
-  ctx.fillStyle = `rgb(${r * .55 | 0},${g * .55 | 0},${b * .55 | 0})`; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = `rgb(${r * .6 | 0},${g * .6 | 0},${b * .6 | 0})`; ctx.fillRect(0, 0, W, H);
   BLOBS.forEach(([R, G, B], k) => {
     const cx = W * (0.5 + 0.38 * Math.sin(0.23 * t + k * 1.7)), cy = H * (0.5 + 0.40 * Math.cos(0.17 * t + k * 2.3));
     const rad = W * (0.95 + 0.15 * Math.sin(0.3 * t + k));
     const gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
-    gr.addColorStop(0, `rgba(${R},${G},${B},.30)`); gr.addColorStop(1, `rgba(${R},${G},${B},0)`);
+    gr.addColorStop(0, `rgba(${R},${G},${B},.34)`); gr.addColorStop(1, `rgba(${R},${G},${B},0)`);
     ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
   });
+  ctx.fillStyle = VIGNETTE; ctx.fillRect(0, 0, W, H);
 }
+const VIGNETTE = (() => {
+  const g = ctx.createRadialGradient(W / 2, H * 0.5, H * 0.25, W / 2, H * 0.5, H * 0.75);
+  g.addColorStop(0, "rgba(10,6,22,0)"); g.addColorStop(1, "rgba(10,6,22,.55)");
+  return g;
+})();
 
 function karaoke(text, prog) {
   ctx.save();
@@ -298,6 +345,10 @@ function drawFrame(t) {
     const k = ease((e - t) / TR);
     place(cards[i], 1.05 - 0.05 * k, 34 * (1 - k), k, -30 * (1 - k));
   } else place(cards[i], 1 + pulse, 0, 1, 0);
+  const flash = i > 0 ? 0.10 * Math.exp(-Math.max(0, t - s) * 7) : 0;
+  if (flash > 0.004) { ctx.fillStyle = `rgba(255,240,252,${flash})`; ctx.fillRect(0, 0, W, H) }
+  const out = (t - (seg.dur - 0.5)) / 0.5;
+  if (out > 0) { ctx.fillStyle = `rgba(12,8,22,${Math.min(1, out) * 0.85})`; ctx.fillRect(0, 0, W, H) }
 }
 
 // ---------- build ----------
